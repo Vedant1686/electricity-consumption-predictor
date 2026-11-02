@@ -1,541 +1,613 @@
+# ==========================================
+# SMART ELECTRICITY CONSUMPTION PREDICTION
+# STREAMLIT APPLICATION
+# ==========================================
+
+import json
+import joblib
+import numpy as np
+import pandas as pd
+import streamlit as st
 
 from pathlib import Path
 
-import joblib
-import pandas as pd
-import plotly.express as px
-import plotly.graph_objects as go
-import streamlit as st
 
-
-# ==================================================
-# PAGE SETUP
-# ==================================================
+# ==========================================
+# 1. PAGE CONFIGURATION
+# ==========================================
 
 st.set_page_config(
-    page_title="Quantum Spam Detection",
-    page_icon="📩",
-    layout="wide",
-    initial_sidebar_state="expanded",
+
+    page_title="Smart Energy Predictor",
+
+    page_icon="⚡",
+
+    layout="wide"
+
 )
 
+
+# ==========================================
+# 2. PROJECT PATHS
+# ==========================================
+
 BASE_DIR = Path(__file__).resolve().parent
-ARTIFACT_DIR = BASE_DIR / "artifacts"
+
+MODEL_PATH = BASE_DIR / "models" / "best_model.pkl"
+
+METRICS_PATH = BASE_DIR / "models" / "metrics.json"
+
+DATA_PATH = BASE_DIR / "energydata_complete.csv"
 
 
-# ==================================================
-# LOAD TRAINED ARTIFACTS
-# ==================================================
+# ==========================================
+# 3. APPLICATION HEADER
+# ==========================================
 
-@st.cache_resource
-def load_artifacts():
-    classical_path = ARTIFACT_DIR / "classical_model.joblib"
-    quantum_path = ARTIFACT_DIR / "quantum_model.joblib"
-    metrics_path = ARTIFACT_DIR / "metrics.joblib"
+st.title("⚡ Smart Electricity Consumption Predictor")
 
-    for path in (classical_path, quantum_path, metrics_path):
-        if not path.exists():
-            raise FileNotFoundError(f"Missing file: {path}")
+st.markdown(
+    """
+    ### Machine Learning Based Energy Prediction System
 
-    return (
-        joblib.load(classical_path),
-        joblib.load(quantum_path),
-        joblib.load(metrics_path),
+    Predict household appliance energy consumption
+    using environmental and time-related information.
+    """
+)
+
+st.divider()
+
+
+# ==========================================
+# 4. CHECK MODEL FILES
+# ==========================================
+
+if not MODEL_PATH.exists() or not METRICS_PATH.exists():
+
+    st.error(
+        "Trained model not found! "
+        "Please execute python train.py first."
     )
 
-
-try:
-    classical_artifacts, quantum_artifacts, metrics = load_artifacts()
-except Exception as exc:
-    st.error("Could not load the model files.")
-    st.code(str(exc))
-    st.info(
-        "Run `python train_model.py` first, then refresh this page."
-    )
     st.stop()
 
 
-# ==================================================
-# PREDICTION HELPERS
-# ==================================================
+# ==========================================
+# 5. LOAD MODEL
+# ==========================================
 
-def predict_classical(message):
-    vectorizer = classical_artifacts["vectorizer"]
-    model = classical_artifacts["model"]
+@st.cache_resource
+def load_model():
 
-    features = vectorizer.transform([message])
-    prediction = str(model.predict(features)[0])
-    score = float(model.decision_function(features)[0])
-
-    return prediction, score
+    return joblib.load(MODEL_PATH)
 
 
-def predict_quantum(message):
-    vectorizer = quantum_artifacts["vectorizer"]
-    reducer = quantum_artifacts["reducer"]
-    scaler = quantum_artifacts["angle_scaler"]
-    model = quantum_artifacts["model"]
-
-    features = vectorizer.transform([message])
-    reduced = reducer.transform(features)
-    angles = scaler.transform(reduced)
-
-    prediction = str(model.predict(angles)[0])
-    score = float(model.decision_function(angles)[0])
-
-    return prediction, score
+model = load_model()
 
 
-def display_prediction(model_name, result):
-    prediction, score = result
+with open(METRICS_PATH, "r") as file:
 
-    if prediction == "spam":
-        st.error("🚨 SPAM MESSAGE")
-    else:
-        st.success("✅ NOT SPAM (HAM)")
-
-    st.caption(f"Model: {model_name}")
-    st.caption(f"Decision score: {score:.4f}")
+    metrics = json.load(file)
 
 
-# ==================================================
-# CHART HELPERS
-# ==================================================
-
-def confusion_matrix_figure(matrix, title):
-    matrix = pd.DataFrame(
-        matrix,
-        index=["Actual Ham", "Actual Spam"],
-        columns=["Predicted Ham", "Predicted Spam"],
-    )
-
-    fig = px.imshow(
-        matrix,
-        text_auto=True,
-        aspect="auto",
-        color_continuous_scale="Blues",
-        labels={
-            "x": "Predicted label",
-            "y": "Actual label",
-            "color": "Messages",
-        },
-        title=title,
-    )
-
-    fig.update_layout(
-        height=360,
-        margin=dict(l=20, r=20, t=60, b=30),
-    )
-
-    return fig
+defaults = metrics["defaults"]
 
 
-def metric_comparison_figure(classical, quantum):
-    rows = []
+# ==========================================
+# 6. SIDEBAR
+# ==========================================
 
-    for model_name, scores in [
-        ("Classical SVM", classical),
-        ("Quantum SVM", quantum),
-    ]:
-        for metric_name in [
-            "accuracy",
-            "precision",
-            "recall",
-            "f1",
-        ]:
-            rows.append({
-                "Model": model_name,
-                "Metric": metric_name.title(),
-                "Score": scores[metric_name],
-            })
+st.sidebar.title("⚡ Project Information")
 
-    data = pd.DataFrame(rows)
-
-    fig = px.bar(
-        data,
-        x="Metric",
-        y="Score",
-        color="Model",
-        barmode="group",
-        text=data["Score"].map(lambda value: f"{value:.1%}"),
-        range_y=[0, 1],
-        title="Classical vs Quantum Model Metrics",
-        color_discrete_sequence=["#3984F5", "#A66CFF"],
-    )
-
-    fig.update_traces(textposition="outside", cliponaxis=False)
-    fig.update_layout(
-        height=430,
-        yaxis_tickformat=".0%",
-        legend_title_text="Model",
-        margin=dict(l=20, r=20, t=70, b=30),
-    )
-
-    return fig
-
-
-# ==================================================
-# SIDEBAR
-# ==================================================
-
-st.sidebar.title(" Quantum Spam AI")
-st.sidebar.caption("Hybrid Quantum-Classical ML")
-
-page = st.sidebar.radio(
-    "Navigation",
-    [
-        "Spam Detector",
-        "Performance Dashboard",
-        "Dataset Insights",
-        "About Project",
-    ],
+st.sidebar.write(
+    "**Project:** Electricity Consumption Prediction"
 )
 
-model_choice = st.sidebar.selectbox(
-    "Prediction model",
-    [
-        "Both Models",
-        "Classical SVM",
-        "Quantum SVM",
-    ],
+st.sidebar.write(
+    "**Technique:** Machine Learning"
 )
+
+st.sidebar.write(
+    "**Task:** Regression"
+)
+
+st.sidebar.write(
+    "**Dataset:** UCI Appliances Energy"
+)
+
+st.sidebar.write(
+    "**Best Model:**"
+)
+
+st.sidebar.success(metrics["best_model"])
+
 
 st.sidebar.divider()
-st.sidebar.caption("SMS Spam Collection Dataset")
+
+st.sidebar.write("Developed using Python and Streamlit")
 
 
-# ==================================================
-# HEADER
-# ==================================================
+# ==========================================
+# 7. DASHBOARD METRICS
+# ==========================================
 
-st.title(" Quantum Spam Detection")
+st.header("📊 Dataset Overview")
+
+col1, col2, col3 = st.columns(3)
+
+
+col1.metric(
+    "Total Records",
+    f"{metrics['dataset_records']:,}"
+)
+
+col2.metric(
+    "Training Records",
+    f"{metrics['training_records']:,}"
+)
+
+col3.metric(
+    "Testing Records",
+    f"{metrics['testing_records']:,}"
+)
+
+
+st.divider()
+
+
+# ==========================================
+# 8. USER INPUT SECTION
+# ==========================================
+
+st.header("🏠 Enter Environmental Conditions")
+
 st.write(
-    "Analyze SMS messages with a classical machine learning model "
-    "and a simulated quantum-kernel classifier."
-)
-
-st.caption(
-    "Python · Streamlit · Scikit-learn · Qiskit"
+    "Enter the environmental conditions to predict "
+    "appliance energy consumption."
 )
 
 
-# ==================================================
-# PAGE 1: SPAM DETECTOR
-# ==================================================
+with st.form("prediction_form"):
 
-if page == "Spam Detector":
+    col1, col2 = st.columns(2)
 
-    st.subheader("Message Analyzer")
 
-    message = st.text_area(
-        "Enter an SMS or email message",
-        placeholder=(
-            "Example: Congratulations! You have won a free prize. "
-            "Call now to claim your reward!"
-        ),
-        height=150,
-        key="message_input",
-    )
+    # --------------------------------------
+    # INDOOR CONDITIONS
+    # --------------------------------------
 
-    analyze = st.button(
-        "🔍 Analyze Message",
-        type="primary",
-        use_container_width=True,
-    )
+    with col1:
 
-    if analyze:
-        if not message.strip():
-            st.warning("Please enter a message first.")
-        else:
-            with st.spinner("Analyzing message..."):
+        st.subheader("🌡️ Indoor Conditions")
 
-                if model_choice == "Classical SVM":
-                    try:
-                        result = predict_classical(message)
-                        st.subheader("Prediction")
-                        display_prediction("Classical Linear SVM", result)
-                    except Exception as exc:
-                        st.error(f"Classical prediction failed: {exc}")
 
-                elif model_choice == "Quantum SVM":
-                    try:
-                        result = predict_quantum(message)
-                        st.subheader("Prediction")
-                        display_prediction("Quantum-kernel SVM", result)
-                    except Exception as exc:
-                        st.error(f"Quantum prediction failed: {exc}")
+        lights = st.number_input(
 
-                else:
-                    try:
-                        classical_result = predict_classical(message)
-                    except Exception as exc:
-                        classical_result = None
-                        st.error(f"Classical prediction failed: {exc}")
+            "Lights Consumption (Wh)",
 
-                    try:
-                        quantum_result = predict_quantum(message)
-                    except Exception as exc:
-                        quantum_result = None
-                        st.error(f"Quantum prediction failed: {exc}")
+            min_value=0.0,
 
-                    left, right = st.columns(2)
+            value=float(defaults["lights"])
 
-                    with left:
-                        st.markdown("### Classical AI")
-                        if classical_result:
-                            display_prediction(
-                                "Classical Linear SVM",
-                                classical_result,
-                            )
+        )
 
-                    with right:
-                        st.markdown("### Quantum AI")
-                        if quantum_result:
-                            display_prediction(
-                                "Quantum-kernel SVM",
-                                quantum_result,
-                            )
 
-                    if (
-                        classical_result
-                        and quantum_result
-                        and classical_result[0] != quantum_result[0]
-                    ):
-                        st.warning(
-                            "The models disagree. Consider the result "
-                            "uncertain and review the message."
-                        )
+        t1 = st.number_input(
+
+            "Kitchen Temperature (°C)",
+
+            value=float(defaults["T1"])
+
+        )
+
+
+        rh1 = st.number_input(
+
+            "Kitchen Humidity (%)",
+
+            min_value=0.0,
+
+            max_value=100.0,
+
+            value=float(defaults["RH_1"])
+
+        )
+
+
+        t2 = st.number_input(
+
+            "Living Room Temperature (°C)",
+
+            value=float(defaults["T2"])
+
+        )
+
+
+        rh2 = st.number_input(
+
+            "Living Room Humidity (%)",
+
+            min_value=0.0,
+
+            max_value=100.0,
+
+            value=float(defaults["RH_2"])
+
+        )
+
+
+    # --------------------------------------
+    # OUTDOOR CONDITIONS
+    # --------------------------------------
+
+    with col2:
+
+        st.subheader("🌤️ Outdoor Conditions")
+
+
+        t_out = st.number_input(
+
+            "Outside Temperature (°C)",
+
+            value=float(defaults["T_out"])
+
+        )
+
+
+        rh_out = st.number_input(
+
+            "Outside Humidity (%)",
+
+            min_value=0.0,
+
+            max_value=100.0,
+
+            value=float(defaults["RH_out"])
+
+        )
+
+
+        windspeed = st.number_input(
+
+            "Wind Speed (m/s)",
+
+            min_value=0.0,
+
+            value=float(defaults["Windspeed"])
+
+        )
+
+
+        hour = st.slider(
+
+            "Select Hour",
+
+            min_value=0,
+
+            max_value=23,
+
+            value=19
+
+        )
+
+
+        day = st.selectbox(
+
+            "Select Day",
+
+            options=list(range(7)),
+
+            format_func=lambda x: [
+
+                "Monday",
+
+                "Tuesday",
+
+                "Wednesday",
+
+                "Thursday",
+
+                "Friday",
+
+                "Saturday",
+
+                "Sunday"
+
+            ][x]
+
+        )
+
 
     st.divider()
 
-    st.subheader("Project at a glance")
+
+    tariff = st.number_input(
+
+        "Electricity Tariff (₹ per kWh)",
+
+        min_value=0.0,
+
+        value=8.0
+
+    )
+
+
+    submit = st.form_submit_button(
+
+        "⚡ Predict Electricity Consumption",
+
+        use_container_width=True
+
+    )
+
+
+# ==========================================
+# 9. PREDICTION
+# ==========================================
+
+if submit:
+
+    # Convert time into numerical features
+
+    hour_sin = np.sin(
+
+        2 * np.pi * hour / 24
+
+    )
+
+    hour_cos = np.cos(
+
+        2 * np.pi * hour / 24
+
+    )
+
+
+    # Prepare input data
+
+    input_data = pd.DataFrame([{
+
+        "lights": lights,
+
+        "T1": t1,
+
+        "RH_1": rh1,
+
+        "T2": t2,
+
+        "RH_2": rh2,
+
+        "T_out": t_out,
+
+        "RH_out": rh_out,
+
+        "Windspeed": windspeed,
+
+        "hour_sin": hour_sin,
+
+        "hour_cos": hour_cos,
+
+        "day_of_week": day
+
+    }])
+
+
+    # Generate prediction
+
+    prediction = float(
+
+        model.predict(input_data)[0]
+
+    )
+
+    prediction = max(0, prediction)
+
+
+    # Convert Wh into kWh
+
+    energy_kwh = prediction / 1000
+
+
+    # Calculate estimated cost
+
+    estimated_cost = energy_kwh * tariff
+
+
+    # --------------------------------------
+    # DISPLAY RESULTS
+    # --------------------------------------
+
+    st.divider()
+
+    st.header("⚡ Prediction Results")
+
 
     col1, col2, col3 = st.columns(3)
 
+
     col1.metric(
-        "Dataset messages",
-        f"{metrics['dataset_size']:,}",
+
+        "Predicted Energy",
+
+        f"{prediction:.2f} Wh"
+
     )
-    col2.metric("Quantum qubits", "4")
-    col3.metric("Models", "2")
+
+
+    col2.metric(
+
+        "Energy Consumption",
+
+        f"{energy_kwh:.4f} kWh"
+
+    )
+
+
+    col3.metric(
+
+        "Estimated Electricity Cost",
+
+        f"₹{estimated_cost:.4f}"
+
+    )
+
+
+    st.success(
+
+        "Energy consumption prediction completed successfully!"
+
+    )
+
 
     st.info(
-        "The displayed decision score is not a calibrated probability. "
-        "Neither model guarantees a correct classification."
+
+        "The predicted value represents appliance energy "
+        "consumption for a 10-minute interval."
     )
 
 
-# ==================================================
-# PAGE 2: PERFORMANCE DASHBOARD
-# ==================================================
+# ==========================================
+# 10. MODEL PERFORMANCE
+# ==========================================
 
-elif page == "Performance Dashboard":
+st.divider()
 
-    st.subheader("Model Performance")
+st.header("📈 Machine Learning Model Performance")
 
-    classical = metrics["classical"]
-    quantum = metrics["quantum"]
 
-    st.markdown("### Classical SVM")
+results = pd.DataFrame(
 
-    c1, c2, c3, c4 = st.columns(4)
+    metrics["results"]
 
-    c1.metric("Accuracy", f"{classical['accuracy']:.2%}")
-    c2.metric("Spam precision", f"{classical['precision']:.2%}")
-    c3.metric("Spam recall", f"{classical['recall']:.2%}")
-    c4.metric("Spam F1-score", f"{classical['f1']:.2%}")
+).T
+
+
+results.index.name = "Algorithm"
+
+
+st.subheader("Algorithm Comparison")
+
+
+st.dataframe(
+
+    results,
+
+    use_container_width=True
+
+)
+
+
+# ==========================================
+# 11. PERFORMANCE CHART
+# ==========================================
+
+st.subheader("Model Error Comparison")
+
+
+st.bar_chart(
+
+    results[["MAE", "RMSE"]]
+
+)
+
+
+# ==========================================
+# 12. ACTUAL VS PREDICTED
+# ==========================================
+
+st.divider()
+
+st.header("📊 Actual vs Predicted Consumption")
+
+
+comparison = pd.DataFrame({
+
+    "Actual Consumption": metrics["test_actual"],
+
+    "Predicted Consumption": metrics["test_predicted"]
+
+})
+
+
+st.line_chart(comparison)
+
+
+# ==========================================
+# 13. HISTORICAL DATA ANALYSIS
+# ==========================================
+
+st.divider()
+
+st.header("📉 Historical Energy Consumption")
+
+
+if DATA_PATH.exists():
+
+    historical_df = pd.read_csv(DATA_PATH)
+
+
+    historical_df["date"] = pd.to_datetime(
+
+        historical_df["date"],
+
+        format="%Y-%m-%d %H:%M:%S"
+
+    )
+
+
+    historical_df = historical_df.sort_values("date")
+
+
+    historical_df["Date"] = (
+
+        historical_df["date"].dt.date
+
+    )
+
+
+    daily_consumption = (
+
+        historical_df.groupby("Date")["Appliances"]
+
+        .mean()
+
+    )
+
+
+    st.subheader("Average Appliance Energy Consumption")
+
+
+    st.line_chart(daily_consumption)
+
 
     st.caption(
-        f"Test set: {classical['test_size']:,} messages · "
-        f"{classical['test_spam_count']} actual spam messages"
-    )
 
-    st.markdown("### Quantum-kernel SVM")
+        "Historical average consumption per 10-minute observation, "
+        "grouped by date."
 
-    q1, q2, q3, q4 = st.columns(4)
-
-    q1.metric("Accuracy", f"{quantum['accuracy']:.2%}")
-    q2.metric("Spam precision", f"{quantum['precision']:.2%}")
-    q3.metric("Spam recall", f"{quantum['recall']:.2%}")
-    q4.metric("Spam F1-score", f"{quantum['f1']:.2%}")
-
-    st.caption(
-        f"Test set: {quantum['test_size']:,} messages · "
-        f"{quantum['test_spam_count']} actual spam messages"
-    )
-
-    st.divider()
-
-    st.plotly_chart(
-        metric_comparison_figure(classical, quantum),
-        use_container_width=True,
-    )
-
-    st.subheader("Confusion Matrices")
-
-    left, right = st.columns(2)
-
-    with left:
-        st.plotly_chart(
-            confusion_matrix_figure(
-                classical["confusion_matrix"],
-                "Classical SVM",
-            ),
-            use_container_width=True,
-        )
-
-    with right:
-        st.plotly_chart(
-            confusion_matrix_figure(
-                quantum["confusion_matrix"],
-                "Quantum-kernel SVM",
-            ),
-            use_container_width=True,
-        )
-
-    st.caption(
-        "Matrix rows represent actual labels; columns represent "
-        "predicted labels. The order is ham, then spam."
-    )
-
-    st.warning(
-        "These results use different test sets: the classical model "
-        "uses the full held-out test set, while the quantum model uses "
-        "a 100-message subset. Compare them cautiously; this is not a "
-        "like-for-like evaluation."
     )
 
 
-# ==================================================
-# PAGE 3: DATASET INSIGHTS
-# ==================================================
+else:
 
-elif page == "Dataset Insights":
-
-    st.subheader("SMS Dataset Overview")
-
-    distribution = metrics["dataset_distribution"]
-
-    total = sum(distribution.values())
-
-    c1, c2, c3 = st.columns(3)
-
-    c1.metric("Total messages", f"{total:,}")
-    c2.metric("Ham messages", f"{distribution['ham']:,}")
-    c3.metric("Spam messages", f"{distribution['spam']:,}")
-
-    distribution_df = pd.DataFrame({
-        "Label": ["Ham", "Spam"],
-        "Messages": [
-            distribution["ham"],
-            distribution["spam"],
-        ],
-    })
-
-    left, right = st.columns(2)
-
-    with left:
-        pie = px.pie(
-            distribution_df,
-            names="Label",
-            values="Messages",
-            hole=0.45,
-            title="Dataset Class Distribution",
-            color="Label",
-            color_discrete_map={
-                "Ham": "#3984F5",
-                "Spam": "#FF6B6B",
-            },
-        )
-        st.plotly_chart(pie, use_container_width=True)
-
-    with right:
-        bar = px.bar(
-            distribution_df,
-            x="Label",
-            y="Messages",
-            text="Messages",
-            title="Message Counts",
-            color="Label",
-            color_discrete_map={
-                "Ham": "#3984F5",
-                "Spam": "#FF6B6B",
-            },
-        )
-        st.plotly_chart(bar, use_container_width=True)
-
-    ham_percent = distribution["ham"] / total * 100
-    spam_percent = distribution["spam"] / total * 100
-
-    st.markdown("### Class balance")
-
-    st.write(f"Ham messages: **{ham_percent:.2f}%**")
-    st.write(f"Spam messages: **{spam_percent:.2f}%**")
-
-    st.warning(
-        "The dataset is imbalanced: legitimate messages are much more "
-        "common than spam. Accuracy alone can therefore be misleading. "
-        "Precision, recall and F1-score are important."
-    )
+    st.warning("Historical dataset not found.")
 
 
-# ==================================================
-# PAGE 4: ABOUT PROJECT
-# ==================================================
-
-elif page == "About Project":
-
-    st.subheader("About the Project")
-
-    st.write(
-        "This project compares a classical text classifier with a "
-        "hybrid quantum-classical classifier for SMS spam detection."
-    )
-
-    st.markdown("### System workflow")
-
-    st.markdown(
-        """
-        1. Load the labelled SMS Spam Collection dataset.
-        2. Transform message text into TF-IDF features.
-        3. Train a classical Linear SVM baseline.
-        4. Reduce text features to four dimensions for quantum encoding.
-        5. Calculate a quantum kernel using a simulated four-qubit circuit.
-        6. Classify messages with a quantum-kernel SVM.
-        7. Compare results with precision, recall, F1-score and confusion matrices.
-        """
-    )
-
-    st.markdown("### Technologies")
-
-    st.markdown(
-        """
-        - Python
-        - Streamlit
-        - Pandas and NumPy
-        - Scikit-learn
-        - Qiskit and Qiskit Machine Learning
-        - Plotly
-        """
-    )
-
-    st.markdown("### Limitations")
-
-    st.write(
-        "The quantum circuit runs on a classical simulator, not on "
-        "physical quantum hardware. The quantum model uses a smaller "
-        "training subset for practical simulation time. Its current "
-        "performance is preliminary and does not establish an advantage "
-        "over the classical model."
-    )
-
-
-# ==================================================
-# FOOTER
-# ==================================================
+# ==========================================
+# 14. FOOTER
+# ==========================================
 
 st.divider()
 
 st.caption(
-    "B.Tech CSE Project | Quantum Computing + Artificial Intelligence"
+
+    "Smart Electricity Consumption Prediction System | "
+    "Developed using Python, Scikit-learn and Streamlit."
+
+)
+
+st.caption(
+
+    "Predictions are estimates based on historical dataset patterns. "
+    "They are not guaranteed measurements of actual electricity usage."
+
 )
